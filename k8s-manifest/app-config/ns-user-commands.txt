@@ -1,0 +1,227 @@
+create name space:
+------------------
+export NAMESPACE=shopping
+
+
+Update KUBECONFIG with generated service account content:
+---------------------------------------------------------
+export KUBECONFIG=$PWD/${NAMESPACE}-user-config.yaml
+
+
+Verify current context:
+-----------------------
+kubectl config view -o jsonpath="{.contexts[?(@.name==\"$(kubectl config current-context)\")].context.namespace}"
+
+
+Deploy sleep application to send curl requests to nodes:
+--------------------------------------------------------
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.6/samples/sleep/sleep.yaml
+
+
+Update PATH with istio bin dir:
+-------------------------------
+export PATH=/Users/supreeth/dev/code/k8s/istio-1.6.3/bin:$PATH
+
+
+Enabling Istio:
+===============
+
+Disable mutual TLS authentication:
+----------------------------------
+// kubectl apply -f disable-mutual-tls.yaml
+** above not needed for minikube
+
+Apply destination rules:
+------------------------
+kubectl apply -f destination-rule.yaml
+
+
+Enable Istio on namespace:
+--------------------------
+// kubectl label namespace $NAMESPACE istio-injection=enabled
+
+
+Deploy application (with Istio sidecar proxy enabled):
+------------------------------------------------------
+cat application.yaml | istioctl kube-inject -f - | kubectl apply -f -
+
+cat application.yaml | istioctl kube-inject -f - | kubectl apply -l app=order,version=v1 -f -
+cat application.yaml | istioctl kube-inject -f - | kubectl apply -l app!=customer -f -
+cat application.yaml | istioctl kube-inject -f - | kubectl apply -l app=customer,version=v2 -f -
+
+
+Deploy application (without Istio sidecar proxy enabled):
+---------------------------------------------------------
+kubectl apply -l version!=v2 -f application.yaml
+
+
+To ensure no issues with istio:
+-------------------------------
+istioctl analyze
+
+
+Sending request to pod using sleep application:
+-----------------------------------------------
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -c sleep -- curl http://order:9000/api/v1/order/customer | grep -o "Steve"
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -c sleep -- curl http://order:9000/api/v1/order/product | grep -o "Stella"
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -c sleep -- curl http://customer:9090/api/v1/customer
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -c sleep -- curl http://product:9091/api/v1/product
+
+while :; do kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -c sleep -- curl order:9000/api/v1/order/customer | grep -o "Steve"; sleep 1; done
+
+
+Check the logs of the Istio sidecar of order microservice:
+----------------------------------------------------------
+kubectl logs -l app=order -c istio-proxy | grep GET
+
+
+Deploying v2 of customer:
+-------------------------
+cat shopping-application.yaml | sed 's/app: customer/app: customer_test/' | kubectl apply -l app=customer_test,version=v2 -f -
+
+
+Testing new version:
+--------------------
+CUSTOMER_V2_POD_IP=$(kubectl get pod -l app=customer_test,version=v2 -o jsonpath='{.items[0].status.podIP}')
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -- curl $CUSTOMER_V2_POD_IP:9090/api/v1/customer
+kubectl exec -it $(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}') -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do curl -o /dev/null -s -w '%{http_code}\n' $CUSTOMER_V2_POD_IP:9090/api/v1/customer; done"
+
+
+Rollout new version:
+--------------------
+kubectl label pods -l app=customer,version=v2 app=customer --overwrite
+
+
+Delete deployment of v2 if any issues:
+--------------------------------------
+kubectl delete deployment customer-v2
+kubectl delete pod -l app=customer,version=v2
+
+
+To redeploy v2:
+---------------
+kubectl apply -l app=customer,version=v2 -f shopping-application.yaml
+
+
+To delete v1:
+-------------
+kubectl delete deployment customer-v1
+
+
+Enable Istio Ingress Gateway Virtual Services:
+----------------------------------------------
+kubectl apply -f - <<EOF
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: shopping-gateway
+spec:
+  selector:
+    istio: ingressgateway # use Istio default gateway implementation
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: shopping-order
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - shopping-gateway.$NAMESPACE.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        exact: /api/v1/order/customer
+    - uri:
+        exact: /api/v1/order/product
+    route:
+    - destination:
+        host: order
+        port:
+          number: 9000
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: shopping-customer
+spec:
+  hosts:
+  - customer.$NAMESPACE.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: customer.$NAMESPACE.svc.cluster.local
+        subset: v2
+      weight: 100
+    - destination:
+        host: customer.$NAMESPACE.svc.cluster.local
+        subset: v1
+      weight: 0
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: shopping-product
+spec:
+  hosts:
+  - product.$NAMESPACE.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: product.$NAMESPACE.svc.cluster.local
+        subset: v1
+      weight: 100
+EOF
+
+
+Check Istio Ingress IP address:
+-------------------------------
+kubectl get svc istio-ingressgateway -n istio-system
+
+
+Pump requests order service through Istio Ingress:
+--------------------------------------------------
+while :; do curl -s <IP address of Istio Ingress>/api/v1/order/customer | grep -o "SteveJobs"; sleep 1; done
+while :; do curl -s <IP address of Istio Ingress>/api/v1/order/product | grep -o "Stella"; sleep 1; done
+while :; do curl -s 10.104.171.87/api/v1/order/customer | grep -o "SteveJobs"; sleep 1; done
+while :; do curl -s 10.104.171.87/api/v1/order/product | grep -o "Stella"; sleep 1; done
+
+
+prometheus queries example:
+---------------------------
+Get total istio requests count:
+istio_requests_total
+
+Get all the requests in your namespace:
+istio_requests_total{destination_service_namespace="shopping", reporter="destination"}
+
+Get the sum of all the requests in your namespace:
+sum(istio_requests_total{destination_service_namespace="shopping", reporter="destination"})
+
+Get the requests to order microservice:
+istio_requests_total{destination_service_namespace="shopping", reporter="destination",destination_service_name="order"}
+
+Rate of requests over the past 5 minutes to all instances of the customer microservice:
+rate(istio_requests_total{destination_service_namespace="shopping", reporter="destination",destination_service_name="customer"}[5m])
+
+
+To kill a pod:
+--------------
+kubectl exec -it $(kubectl get pods -l app=product -o jsonpath='{.items[0].metadata.name}') -- pkill node
+
+
+Terminating all customer pods:
+------------------------------
+for pod in $(kubectl get pods -l app=customer -o jsonpath='{.items[*].metadata.name}'); do echo terminating $pod; kubectl exec -it $pod -- pkill node; done
+
+
+while loop example:
+----------------------
+while :; do kubectl get pods; sleep 1; done

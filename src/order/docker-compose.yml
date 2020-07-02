@@ -1,0 +1,8 @@
+version: '3.7'
+
+services:
+  order-service:
+    container_name: order
+    image: order
+    ports:
+      - 9000:9000

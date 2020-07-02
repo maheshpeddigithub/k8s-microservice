@@ -1,0 +1,185 @@
+##################################################################################################
+# Customer service
+##################################################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer
+  labels:
+    app: customer
+    service: customer
+spec:
+  ports:
+  - port: 9090
+    name: http
+  selector:
+    app: customer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shopping-customer
+  labels:
+    account: customer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-v1
+  labels:
+    app: customer
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customer
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: customer
+        version: v1
+    spec:
+      serviceAccountName: shopping-customer
+      containers:
+      - name: customer
+        image: docker.io/cloudmahesh/customer:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-v2
+  labels:
+    app: customer
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customer
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: customer
+        version: v2
+    spec:
+      serviceAccountName: shopping-customer
+      containers:
+      - name: customer
+        image: docker.io/cloudmahesh/customer:v2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+---
+##################################################################################################
+# Product service
+##################################################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: product
+  labels:
+    app: product
+    service: product
+spec:
+  ports:
+  - port: 9091
+    name: http
+  selector:
+    app: product
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shopping-product
+  labels:
+    account: product
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-v1
+  labels:
+    app: product
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: product
+        version: v1
+    spec:
+      serviceAccountName: shopping-product
+      containers:
+      - name: product
+        image: docker.io/cloudmahesh/product:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9091
+---
+##################################################################################################
+# Order service
+##################################################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  labels:
+    app: order
+    service: order
+spec:
+  ports:
+  - port: 9000
+    name: http
+  selector:
+    app: order
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shopping-order
+  labels:
+    account: order
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-v1
+  labels:
+    app: order
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: order
+        version: v1
+    spec:
+      serviceAccountName: shopping-order
+      containers:
+      - name: order
+        image: docker.io/cloudmahesh/order:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9000
+        env:
+          - name: CUSTOMER_SERVICE_HOST
+            value: "customer"
+          - name: PRODUCT_SERVICE_HOST
+            value: "product"
+---

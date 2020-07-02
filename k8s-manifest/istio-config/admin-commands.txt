@@ -1,0 +1,52 @@
+Download Istio and update path variable:
+----------------------------------------
+curl -L https://istio.io/downloadIstio | sh -
+cd istio-1.6.3
+export PATH=$PWD/bin:$PATH
+
+
+Install Istio in K8S:
+---------------------
+istioctl install --set profile=demo
+
+
+Enable Istio on default name space:
+-----------------------------------
+// kubectl label namespace default istio-injection=enabled
+
+
+Enable Envoy’s access logging:
+------------------------------
+istioctl install --set profile=demo --set meshConfig.accessLogFile="/dev/stdout"
+
+
+Accessing monitoring applications:
+----------------------------------
+istioctl dashboard kiali &
+istioctl dashboard grafana &
+istioctl dashboard prometheus &
+
+kubectl -n istio-system port-forward $(kubectl -n istio-system get pod -l app=kiali -o jsonpath='{.items[0].metadata.name}') 20001:20001 &
+kubectl -n istio-system port-forward $(kubectl -n istio-system get pod -l app=grafana -o jsonpath='{.items[0].metadata.name}') 3000:3000 &
+kubectl -n istio-system port-forward $(kubectl -n istio-system get pod -l app=prometheus -o jsonpath='{.items[0].metadata.name}') 9090:9090 &
+
+
+Create role to provide read access to the istio-system namespace:
+-----------------------------------------------------------------
+kubectl apply -f - <<EOF
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: istio-system-access
+  namespace: istio-system
+rules:
+- apiGroups: ["", "extensions", "apps"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+EOF
+
+
+
+To delete all processes started using istioctl (for e.g. Grafana):
+------------------------------------------------------------------
+killall istioctl
